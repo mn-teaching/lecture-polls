@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Live poll</title>
-<meta name="lecture-polls-version" content="2">
+<meta name="lecture-polls-version" content="3">
 <!-- A PowerPoint content add-in (lecture-polls skill). The Office library must load here: PowerPoint
      only keeps add-ins whose own page reports ready. Data: the course's Google Apps Script web app. -->
 <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
@@ -28,8 +28,8 @@
 <main>
   <h1 id="title">Live poll</h1>
   <div class="legend" aria-hidden="true">
-    <span><span class="sw" style="background: var(--r1)"></span>Round 1 <span id="n1"></span></span>
-    <span><span class="sw" style="background: var(--r2)"></span>Round 2 <span id="n2"></span></span>
+    <span><span class="sw" style="background: var(--r1)" id="sw1"></span><span id="l1">Round 1</span> <span id="n1"></span></span>
+    <span id="r2"><span class="sw" style="background: var(--r2)"></span>Round 2 <span id="n2"></span></span>
   </div>
   <div id="wrap"><svg id="chart" role="img" aria-labelledby="desc"></svg></div>
   <p id="desc" class="sr">Waiting for votes.</p>
@@ -59,7 +59,11 @@
     svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
     var t1 = Math.max(d.total1, 1), t2 = Math.max(d.total2, 1);
     var p1 = d.round1.map(function (c) { return c / t1; }), p2 = d.round2.map(function (c) { return c / t2; });
+    var one = d.rounds === 1;
     var gw = W / n, bw = Math.min(gw * 0.34, fs * 5);
+    $('r2').hidden = one;
+    $('l1').textContent = one ? 'Votes' : 'Round 1';
+    $('sw1').style.background = one ? 'var(--r2)' : 'var(--r1)';
     d.options.forEach(function (o, i) {  // the right answer: a green band behind its bars
       if (answer && o === answer) s += '<rect x="' + (gw * i + gw * 0.06) + '" y="' + (top - fs * 0.6) + '" width="' + gw * 0.88
         + '" height="' + (H - top + fs * 0.6) + '" rx="' + fs * 0.4 + '" fill="var(--okbg)"/>';
@@ -70,10 +74,12 @@
     }
     d.options.forEach(function (o, i) {
       var x = gw * i + gw / 2, ok = answer && o === answer;
-      [[p1[i], 'var(--r1)', -bw - fs * 0.15, d.round1[i]], [p2[i], 'var(--r2)', fs * 0.15, d.round2[i]]].forEach(function (b) {
-        var h = (base - top) * b[0], bx = x + b[2];
-        s += '<rect x="' + bx + '" y="' + (base - h) + '" width="' + bw + '" height="' + h + '" fill="' + b[1] + '" rx="3"/>';
-        if (b[3] > 0) s += '<text x="' + (bx + bw / 2) + '" y="' + (base - h - fs * 0.3) + '" text-anchor="middle" font-size="'
+      var bars = one ? [[p1[i], 'var(--r2)', -bw, d.round1[i]]]  // a survey: one round, one wide bar
+        : [[p1[i], 'var(--r1)', -bw - fs * 0.15, d.round1[i]], [p2[i], 'var(--r2)', fs * 0.15, d.round2[i]]];
+      bars.forEach(function (b) {
+        var w = one ? 2 * bw : bw, h = (base - top) * b[0], bx = x + b[2];
+        s += '<rect x="' + bx + '" y="' + (base - h) + '" width="' + w + '" height="' + h + '" fill="' + b[1] + '" rx="3"/>';
+        if (b[3] > 0) s += '<text x="' + (bx + w / 2) + '" y="' + (base - h - fs * 0.3) + '" text-anchor="middle" font-size="'
                           + fs + '" fill="var(--fg)">' + Math.round(b[0] * 100) + '%</text>';
       });
       s += '<text x="' + x + '" y="' + (base + lab * 1.1) + '" text-anchor="middle" font-size="' + lab + '" font-weight="700" fill="'
@@ -82,9 +88,11 @@
     svg.innerHTML = s;
     $('n1').textContent = '(' + d.total1 + ')';
     $('n2').textContent = '(' + d.total2 + ')';
-    $('desc').textContent = 'Votes per option. Round 1: ' + d.options.map(function (o, i) { return o + ' ' + d.round1[i]; }).join(', ')
-      + '. Round 2: ' + d.options.map(function (o, i) { return o + ' ' + d.round2[i]; }).join(', ') + '.'
-      + (answer ? ' The right answer is ' + answer + '.' : '');
+    $('desc').textContent = one
+      ? 'Votes per option: ' + d.options.map(function (o, i) { return o + ' ' + d.round1[i]; }).join(', ') + '.'
+      : 'Votes per option. Round 1: ' + d.options.map(function (o, i) { return o + ' ' + d.round1[i]; }).join(', ')
+        + '. Round 2: ' + d.options.map(function (o, i) { return o + ' ' + d.round2[i]; }).join(', ') + '.'
+        + (answer ? ' The right answer is ' + answer + '.' : '');
   }
   window.addEventListener('resize', function () { if (last) draw(last); });
 
