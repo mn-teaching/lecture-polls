@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live poll add-in: test 2</title>
+<!-- PowerPoint requires the add-in's own page to load Office.js and report ready (Office.onReady) -->
+<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; font-family: Calibri, "Segoe UI", Arial, sans-serif; background: #fff; color: #14213d; }
+  main { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; }
+  .clock { font-size: 56px; font-weight: 700; color: #2f5597; font-variant-numeric: tabular-nums; }
+  .msg { font-size: 22px; }
+  .line { font-size: 15px; color: #4f5869; max-width: 92%; }
+  .ok { color: #1d6b35; } .bad { color: #b42318; }
+</style>
+</head>
+<body>
+<main>
+  <div class="msg">Hello from your add-in (test 2)</div>
+  <div class="clock" id="clock">--:--:--</div>
+  <div class="line" id="office">Office: connecting ...</div>
+  <div class="line" id="data">Data from Apps Script: waiting ...</div>
+</main>
+<script>
+  // the Apps Script address comes from the manifest: index.html?data=<Web app URL>
+  var DATA = new URLSearchParams(location.search).get('data');
+  function tick() { document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }
+  tick(); setInterval(tick, 1000);
+
+  var office = document.getElementById('office');
+  Office.onReady(function (info) {
+    office.textContent = 'Office: connected (' + (info.host || 'browser, not PowerPoint') + ')';
+    office.className = 'line ok';
+  });
+
+  var data = document.getElementById('data');
+  function poll() {
+    if (!DATA) { data.textContent = 'Data from Apps Script: no address given'; data.className = 'line bad'; return; }
+    fetch(DATA + (DATA.indexOf('?') < 0 ? '?' : '&') + 'mode=json', { cache: 'no-store' })
+      .then(function (r) { return r.text().then(function (t) { return { status: r.status, text: t }; }); })
+      .then(function (r) {
+        try {
+          var j = JSON.parse(r.text);
+          data.textContent = 'Data from Apps Script: OK, server time ' + new Date(j.time).toLocaleTimeString();
+          data.className = 'line ok';
+        } catch (e) {
+          data.textContent = 'Data from Apps Script: got a page instead of data (HTTP ' + r.status + '): probably a sign-in page';
+          data.className = 'line bad';
+        }
+      })
+      .catch(function (e) {
+        data.textContent = 'Data from Apps Script: blocked (' + e.message + '): probably the UCSD sign-in';
+        data.className = 'line bad';
+      });
+  }
+  poll(); setInterval(poll, 5000);
+</script>
+</body>
+</html>
