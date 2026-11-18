@@ -4,18 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Live poll</title>
+<meta name="lecture-polls-version" content="2">
 <!-- A PowerPoint content add-in (lecture-polls skill). The Office library must load here: PowerPoint
      only keeps add-ins whose own page reports ready. Data: the course's Google Apps Script web app. -->
 <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
 <style>
-  :root { --fg: #14213d; --muted: #4f5869; --r1: #9dc3e6; --r2: #2f5597; --grid: #d9dee7; --bg: #ffffff; }
+  :root { --fg: #14213d; --muted: #4f5869; --r1: #9dc3e6; --r2: #2f5597; --grid: #d9dee7; --bg: #ffffff;
+          --ok: #00a040; --okbg: #e3f4e8; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
                font-family: Calibri, "Segoe UI", Arial, sans-serif; }
-  main { box-sizing: border-box; height: 100%; padding: 2.5vh 3vw; display: flex; flex-direction: column; }
-  h1 { font-size: clamp(14px, 4.2vh, 30px); margin: 0 0 1vh; font-weight: 600; }
+  main { box-sizing: border-box; height: 100%; padding: 2vh 2.5vw; display: flex; flex-direction: column; }
+  h1 { font-size: clamp(12px, 3.6vh, 26px); margin: 0 0 1vh; font-weight: 600; color: var(--muted); }
   .legend { display: flex; gap: 2.5vw; font-size: clamp(11px, 3.2vh, 22px); color: var(--muted); margin-bottom: 1vh; }
   .sw { display: inline-block; width: 1em; height: 1em; vertical-align: -0.15em; margin-right: 0.35em; border-radius: 2px; }
-  svg { flex: 1; width: 100%; min-height: 0; }
+  #wrap { flex: 1; min-height: 0; position: relative; }
+  svg { position: absolute; inset: 0; width: 100%; height: 100%; }
   .status { font-size: clamp(10px, 2.6vh, 16px); color: var(--muted); margin-top: 0.6vh; }
   .pick { font-size: 16px; line-height: 1.6; } .pick button { font: inherit; margin: 3px 6px 3px 0; padding: 4px 10px; cursor: pointer; }
   .sr { position: absolute; left: -9999px; }
@@ -28,7 +31,7 @@
     <span><span class="sw" style="background: var(--r1)"></span>Round 1 <span id="n1"></span></span>
     <span><span class="sw" style="background: var(--r2)"></span>Round 2 <span id="n2"></span></span>
   </div>
-  <svg id="chart" role="img" aria-labelledby="desc" viewBox="0 0 1000 420" preserveAspectRatio="none"></svg>
+  <div id="wrap"><svg id="chart" role="img" aria-labelledby="desc"></svg></div>
   <p id="desc" class="sr">Waiting for votes.</p>
   <div class="status" id="status">Connecting ...</div>
   <div class="pick" id="pick" hidden></div>
@@ -37,6 +40,8 @@
   var Q = new URLSearchParams(location.search);
   var SERVER = Q.get('data');                  // the Apps Script web app (from the manifest)
   var poll = Q.get('poll');                    // a poll id in the address (outside PowerPoint)
+  var answer = Q.get('answer');                // the right option's letter: marked on the answer slide
+  var last = null;
   var inOffice = false;
   var $ = function (id) { return document.getElementById(id); };
 
@@ -45,31 +50,43 @@
     return fetch(u, { cache: 'no-store' }).then(function (r) { return r.json(); });
   }
 
-  function draw(d) {
-    var svg = $('chart'), n = d.options.length, W = 1000, H = 420, base = 370, top = 30;
+  function draw(d) {  // drawn at the frame's real size, so text and bars are never stretched
+    last = d;
+    var svg = $('chart'), box = $('wrap').getBoundingClientRect();
+    var W = Math.max(box.width, 200), H = Math.max(box.height, 120), n = d.options.length;
+    var fs = Math.max(11, Math.min(H * 0.075, W / n * 0.16)), lab = fs * 1.5;
+    var top = fs * 1.6, base = H - lab * 1.5, s = '';
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
     var t1 = Math.max(d.total1, 1), t2 = Math.max(d.total2, 1);
     var p1 = d.round1.map(function (c) { return c / t1; }), p2 = d.round2.map(function (c) { return c / t2; });
-    var gw = W / n, bw = gw * 0.32, s = '';
+    var gw = W / n, bw = Math.min(gw * 0.34, fs * 5);
+    d.options.forEach(function (o, i) {  // the right answer: a green band behind its bars
+      if (answer && o === answer) s += '<rect x="' + (gw * i + gw * 0.06) + '" y="' + (top - fs * 0.6) + '" width="' + gw * 0.88
+        + '" height="' + (H - top + fs * 0.6) + '" rx="' + fs * 0.4 + '" fill="var(--okbg)"/>';
+    });
     for (var g = 0; g <= 4; g++) {  // grid at 0, 25, 50, 75, 100 %
       var y = base - (base - top) * g / 4;
       s += '<line x1="0" x2="' + W + '" y1="' + y + '" y2="' + y + '" stroke="var(--grid)" stroke-width="1"/>';
     }
-    d.options.forEach(function (lab, i) {
-      var x = gw * i + gw / 2;
-      [[p1[i], 'var(--r1)', -bw - 4, d.round1[i]], [p2[i], 'var(--r2)', 4, d.round2[i]]].forEach(function (b) {
+    d.options.forEach(function (o, i) {
+      var x = gw * i + gw / 2, ok = answer && o === answer;
+      [[p1[i], 'var(--r1)', -bw - fs * 0.15, d.round1[i]], [p2[i], 'var(--r2)', fs * 0.15, d.round2[i]]].forEach(function (b) {
         var h = (base - top) * b[0], bx = x + b[2];
         s += '<rect x="' + bx + '" y="' + (base - h) + '" width="' + bw + '" height="' + h + '" fill="' + b[1] + '" rx="3"/>';
-        if (b[3] > 0) s += '<text x="' + (bx + bw / 2) + '" y="' + (base - h - 8) + '" text-anchor="middle" font-size="26" fill="var(--fg)">'
-                          + Math.round(b[0] * 100) + '%</text>';
+        if (b[3] > 0) s += '<text x="' + (bx + bw / 2) + '" y="' + (base - h - fs * 0.3) + '" text-anchor="middle" font-size="'
+                          + fs + '" fill="var(--fg)">' + Math.round(b[0] * 100) + '%</text>';
       });
-      s += '<text x="' + x + '" y="' + (base + 40) + '" text-anchor="middle" font-size="34" font-weight="700" fill="var(--fg)">' + lab + '</text>';
+      s += '<text x="' + x + '" y="' + (base + lab * 1.1) + '" text-anchor="middle" font-size="' + lab + '" font-weight="700" fill="'
+        + (ok ? 'var(--ok)' : 'var(--fg)') + '">' + o + (ok ? ' ✓' : '') + '</text>';
     });
     svg.innerHTML = s;
     $('n1').textContent = '(' + d.total1 + ')';
     $('n2').textContent = '(' + d.total2 + ')';
     $('desc').textContent = 'Votes per option. Round 1: ' + d.options.map(function (o, i) { return o + ' ' + d.round1[i]; }).join(', ')
-      + '. Round 2: ' + d.options.map(function (o, i) { return o + ' ' + d.round2[i]; }).join(', ') + '.';
+      + '. Round 2: ' + d.options.map(function (o, i) { return o + ' ' + d.round2[i]; }).join(', ') + '.'
+      + (answer ? ' The right answer is ' + answer + '.' : '');
   }
+  window.addEventListener('resize', function () { if (last) draw(last); });
 
   function refresh() {
     if (!poll) return;
@@ -77,7 +94,9 @@
       if (!d.ok) { $('status').textContent = 'Poll ' + poll + ': ' + (d.error || 'no data'); return; }
       $('title').textContent = d.title;
       draw(d);
-      $('status').textContent = 'Updated ' + new Date().toLocaleTimeString() + (inOffice ? '' : ' · ' + poll);
+      var since = d.since ? new Date(d.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+      $('status').textContent = (since ? 'Votes since ' + since + ' · ' : '') + 'updated ' + new Date().toLocaleTimeString()
+        + (inOffice ? '' : ' · ' + poll);
     }).catch(function (e) { $('status').textContent = 'No connection to the poll server (' + e.message + '), retrying ...'; });
   }
 
@@ -110,6 +129,7 @@
   Office.onReady(function (info) {
     inOffice = !!info.host;
     if (inOffice && !poll) poll = Office.context.document.settings.get('poll');
+    if (inOffice && !answer) answer = Office.context.document.settings.get('answer');
     if (!SERVER) { $('status').textContent = 'No poll server in the add-in manifest.'; return; }
     setInterval(refresh, 3000);  // refresh() waits until a poll is chosen
     if (!poll) { $('status').textContent = 'Choose the question this slide shows:'; choose(Q.get('lecture')); return; }
