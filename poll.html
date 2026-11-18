@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live poll</title>
+<!-- A PowerPoint content add-in (lecture-polls skill). The Office library must load here: PowerPoint
+     only keeps add-ins whose own page reports ready. Data: the course's Google Apps Script web app. -->
+<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<style>
+  :root { --fg: #14213d; --muted: #4f5869; --r1: #9dc3e6; --r2: #2f5597; --grid: #d9dee7; --bg: #ffffff; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+               font-family: Calibri, "Segoe UI", Arial, sans-serif; }
+  main { box-sizing: border-box; height: 100%; padding: 2.5vh 3vw; display: flex; flex-direction: column; }
+  h1 { font-size: clamp(14px, 4.2vh, 30px); margin: 0 0 1vh; font-weight: 600; }
+  .legend { display: flex; gap: 2.5vw; font-size: clamp(11px, 3.2vh, 22px); color: var(--muted); margin-bottom: 1vh; }
+  .sw { display: inline-block; width: 1em; height: 1em; vertical-align: -0.15em; margin-right: 0.35em; border-radius: 2px; }
+  svg { flex: 1; width: 100%; min-height: 0; }
+  .status { font-size: clamp(10px, 2.6vh, 16px); color: var(--muted); margin-top: 0.6vh; }
+  .pick { font-size: 16px; line-height: 1.6; } .pick button { font: inherit; margin: 3px 6px 3px 0; padding: 4px 10px; cursor: pointer; }
+  .sr { position: absolute; left: -9999px; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Live poll</h1>
+  <div class="legend" aria-hidden="true">
+    <span><span class="sw" style="background: var(--r1)"></span>Round 1 <span id="n1"></span></span>
+    <span><span class="sw" style="background: var(--r2)"></span>Round 2 <span id="n2"></span></span>
+  </div>
+  <svg id="chart" role="img" aria-labelledby="desc" viewBox="0 0 1000 420" preserveAspectRatio="none"></svg>
+  <p id="desc" class="sr">Waiting for votes.</p>
+  <div class="status" id="status">Connecting ...</div>
+  <div class="pick" id="pick" hidden></div>
+</main>
+<script>
+  var Q = new URLSearchParams(location.search);
+  var SERVER = Q.get('data');                  // the Apps Script web app (from the manifest)
+  var poll = Q.get('poll');                    // a poll id in the address (outside PowerPoint)
+  var inOffice = false;
+  var $ = function (id) { return document.getElementById(id); };
+
+  function api(params) {
+    var u = SERVER + '?' + new URLSearchParams(params).toString();
+    return fetch(u, { cache: 'no-store' }).then(function (r) { return r.json(); });
+  }
+
+  function draw(d) {
+    var svg = $('chart'), n = d.options.length, W = 1000, H = 420, base = 370, top = 30;
+    var t1 = Math.max(d.total1, 1), t2 = Math.max(d.total2, 1);
+    var p1 = d.round1.map(function (c) { return c / t1; }), p2 = d.round2.map(function (c) { return c / t2; });
+    var gw = W / n, bw = gw * 0.32, s = '';
+    for (var g = 0; g <= 4; g++) {  // grid at 0, 25, 50, 75, 100 %
+      var y = base - (base - top) * g / 4;
+      s += '<line x1="0" x2="' + W + '" y1="' + y + '" y2="' + y + '" stroke="var(--grid)" stroke-width="1"/>';
+    }
+    d.options.forEach(function (lab, i) {
+      var x = gw * i + gw / 2;
+      [[p1[i], 'var(--r1)', -bw - 4, d.round1[i]], [p2[i], 'var(--r2)', 4, d.round2[i]]].forEach(function (b) {
+        var h = (base - top) * b[0], bx = x + b[2];
+        s += '<rect x="' + bx + '" y="' + (base - h) + '" width="' + bw + '" height="' + h + '" fill="' + b[1] + '" rx="3"/>';
+        if (b[3] > 0) s += '<text x="' + (bx + bw / 2) + '" y="' + (base - h - 8) + '" text-anchor="middle" font-size="26" fill="var(--fg)">'
+                          + Math.round(b[0] * 100) + '%</text>';
+      });
+      s += '<text x="' + x + '" y="' + (base + 40) + '" text-anchor="middle" font-size="34" font-weight="700" fill="var(--fg)">' + lab + '</text>';
+    });
+    svg.innerHTML = s;
+    $('n1').textContent = '(' + d.total1 + ')';
+    $('n2').textContent = '(' + d.total2 + ')';
+    $('desc').textContent = 'Votes per option. Round 1: ' + d.options.map(function (o, i) { return o + ' ' + d.round1[i]; }).join(', ')
+      + '. Round 2: ' + d.options.map(function (o, i) { return o + ' ' + d.round2[i]; }).join(', ') + '.';
+  }
+
+  function refresh() {
+    if (!poll) return;
+    api({ mode: 'counts', poll: poll }).then(function (d) {
+      if (!d.ok) { $('status').textContent = 'Poll ' + poll + ': ' + (d.error || 'no data'); return; }
+      $('title').textContent = d.title;
+      draw(d);
+      $('status').textContent = 'Updated ' + new Date().toLocaleTimeString() + (inOffice ? '' : ' · ' + poll);
+    }).catch(function (e) { $('status').textContent = 'No connection to the poll server (' + e.message + '), retrying ...'; });
+  }
+
+  function choose(lecture) {  // first use of this add-in on a slide: pick the question it shows
+    var box = $('pick');
+    box.hidden = false;
+    box.innerHTML = 'Lecture number: <input id="lec" size="3" value="' + (lecture || '') + '"> <button id="go">Show its polls</button><div id="list"></div>';
+    $('go').onclick = function () {
+      var nn = ('0' + $('lec').value.trim()).slice(-2);
+      api({ mode: 'links', lecture: nn }).then(function (list) {
+        $('list').innerHTML = list.length ? '' : 'No polls for lecture ' + nn + ' yet.';
+        list.forEach(function (p) {
+          var b = document.createElement('button');
+          b.textContent = p.id + (p.slide ? ' (slide ' + p.slide + ')' : '');
+          b.onclick = function () {
+            poll = p.id;
+            if (inOffice) {
+              Office.context.document.settings.set('poll', poll);
+              Office.context.document.settings.saveAsync();
+            }
+            box.hidden = true;
+            refresh();
+          };
+          $('list').appendChild(b);
+        });
+      });
+    };
+  }
+
+  Office.onReady(function (info) {
+    inOffice = !!info.host;
+    if (inOffice && !poll) poll = Office.context.document.settings.get('poll');
+    if (!SERVER) { $('status').textContent = 'No poll server in the add-in manifest.'; return; }
+    setInterval(refresh, 3000);  // refresh() waits until a poll is chosen
+    if (!poll) { $('status').textContent = 'Choose the question this slide shows:'; choose(Q.get('lecture')); return; }
+    refresh();
+  });
+</script>
+</body>
+</html>
